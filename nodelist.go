@@ -19,7 +19,7 @@ func LoadNodeListByName(name string) (node_list []Node) {
 	node_lists, _ := ListNodeLists()
 
 	for _, listPath := range node_lists {
-		listName := strings.TrimLeft(path.Base(listPath), "nodes.")
+		listName := path.Base(listPath)[6:] //, "nodes.")
 		if listName == name {
 			dshList, _ := ReadNodeList(listPath)
 			return dshList

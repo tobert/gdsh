@@ -44,29 +44,29 @@ func saveNsshPlaceholders(ph NsshPlaceholderList) {
 	jsonBytes, err := json.Marshal(&ph)
 	if err == nil {
 		ioutil.WriteFile(nsshPlaceholderFile(), jsonBytes, 0644)
+	} else {
+		log.Fatal("BUG: could not persist placeholder data: ", err)
 	}
-	log.Fatal("BUG: could not persist placeholder data: ", err)
 }
 
 func nextNsshNode(dshListName string) (node Node) {
 	dshList := LoadNodeListByName(dshListName)
 
 	placeholders, err := loadNsshPlaceholders()
-	if err != nil {
-		log.Fatal("getting next node from list failed: %s", err)
-	}
-
-	for _, ph := range placeholders {
-		if ph.Dsh_list == dshListName {
-			for i, n := range dshList {
-				if n.hostname == ph.Node {
-					// already at last node in list
-					if i == len(dshList)-1 {
-						log.Fatal("Already at last node in list '%s'\n", dshListName)
-					} else {
-						ph.Node = dshList[i+1].hostname
-						saveNsshPlaceholders(placeholders)
-						return dshList[i+1]
+	// TODO: switch to a map to kill off some of these indentation levels
+	if err == nil {
+		for pi, ph := range placeholders {
+			if ph.Dsh_list == dshListName {
+				for i, n := range dshList {
+					if n.hostname == ph.Node {
+						// already at last node in list
+						if i == len(dshList)-1 {
+							log.Fatal("Already at last node in list '%s'\n", dshListName)
+						} else {
+							placeholders[pi] = NsshPlaceholder{dshListName, dshList[i+1].hostname}
+							saveNsshPlaceholders(placeholders)
+							return dshList[i+1]
+						}
 					}
 				}
 			}
