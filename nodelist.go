@@ -1,9 +1,9 @@
 package main
 
 import (
-	"log"
 	"bufio"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -19,7 +19,7 @@ func LoadNodeListByName(name string) (node_list []Node) {
 	node_lists, _ := ListNodeLists()
 
 	for _, listPath := range node_lists {
-		listName := strings.TrimLeft(path.Base(listPath), "machines.")
+		listName := strings.TrimLeft(path.Base(listPath), "nodes.")
 		if listName == name {
 			dshList, _ := ReadNodeList(listPath)
 			return dshList
@@ -44,14 +44,15 @@ func ListNodeLists() (lists []string, err error) {
 		return
 	}
 
-	visitor := func(path string, f os.FileInfo, err error) error {
+	visitor := func(listPath string, f os.FileInfo, err error) error {
 		// ModeType is a poorly named mask meaning "not a special file", so assume it's a file
 		if f.Mode()&os.ModeType != 0 {
 			return nil
 		}
-		// TODO: maybe check /^machines\./ like the old stuff? or just read everything in that directory?
 
-		lists = append(lists, path)
+		if strings.HasPrefix(path.Base(listPath), "nodes.") {
+			lists = append(lists, listPath)
+		}
 
 		return nil
 	}

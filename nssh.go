@@ -135,10 +135,8 @@ func ParseOptions() (opts nsshOptions) {
 		}
 	}
 
-	if opts.hostname == "" && opts.nssh_next {
-		if opts.dsh_list == "" {
-			opts.dsh_list = "default"
-		}
+	if opts.hostname == "" && opts.nssh_next && opts.dsh_list == "" {
+		opts.dsh_list = "default"
 	}
 
 	return opts
