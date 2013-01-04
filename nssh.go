@@ -1,23 +1,83 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
+	"os/exec"
+	"path"
 	"regexp"
 	"strings"
-	"os/exec"
 )
 
-type NsshOptions struct {
+type nsshOptions struct {
 	dsh_list, hostname, comment string
 	ssh_args                    []string
 	nssh_next, nssh_reset       bool
 }
 
+// public, will be serialized as json
+type NsshPlaceholder struct {
+	Dsh_list, Node string
+}
+type NsshPlaceholderList []NsshPlaceholder
+
+func nsshPlaceholderFile() string {
+	return path.Join(os.Getenv("HOME"), ".gdsh", ".nssh-next.json")
+}
+
+func loadNsshPlaceholders() (ph NsshPlaceholderList, err error) {
+	jsonBytes, err := ioutil.ReadFile(nsshPlaceholderFile())
+	// TODO: check for missing file and return an initialized, empty
+	// data structure instead
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(jsonBytes, &ph)
+	return
+}
+
+func saveNsshPlaceholders() (ph NsshPlaceholderList) {
+	return nil
+}
+
+func nextNsshNode(dshListName string) (node Node) {
+	dshList := LoadNodeListByName(dshListName)
+
+	placeholders, err := loadNsshPlaceholders()
+	if err != nil {
+		log.Fatal("getting next node from list failed: %s", err)
+	}
+
+	for _, ph := range placeholders {
+		if ph.Dsh_list == dshListName {
+			for i, n := range dshList {
+				if n.hostname == ph.Node {
+					// already at last node in list
+					if i == len(dshList)-1 {
+						log.Fatal("Already at last node in list '%s'\n", dshListName)
+					} else {
+						return dshList[i+1]
+					}
+				}
+			}
+		}
+	}
+
+	log.Fatal("no next node found\n")
+	return
+}
+
+func resetNsshNode(dshListName string) {
+}
+
 // parse command line options, recognizing common ssh options and saving them
 // while extracting nssh's options and, hopefully, the hostname that can be
 // infixed, e.g. ssh foobar.com -l tobert
-func ParseOptions() (opts NsshOptions) {
+func ParseOptions() (opts nsshOptions) {
 	// we don't actually care about what the ssh options mean, they only
 	// need to be recognized and eliminated so the hostname can be found
 	no_arg_re, err := regexp.Compile("^-[1246AaCfgKkMNnqsTtVvXxY]$")
@@ -35,9 +95,10 @@ func ParseOptions() (opts NsshOptions) {
 		panic("BUG: regular expression compilation failed!")
 	}
 
-	skip_next := false
-	for i, arg := range os.Args[1:] {
+	skip_next := true
+	for i, arg := range os.Args {
 		if skip_next {
+			skip_next = false
 			continue
 		} else if no_arg_re.MatchString(arg) {
 			opts.ssh_args = append(opts.ssh_args, arg)
@@ -78,25 +139,32 @@ func ParseOptions() (opts NsshOptions) {
 func NamedScreenSSHWrapper() {
 	opts := ParseOptions()
 
-	screen_string := "ERROR(nssh)"
 	if opts.nssh_next {
-		fmt.Print("Placeholder: --next not implemented yet.\n")
-		screen_string = "nssh PLACEHOLDER --next"
+		next := nextNsshNode(opts.dsh_list)
+		opts.hostname = next.hostname
+		opts.comment = next.comment
+		log.Printf("previous: %s", next.hostname)
 	} else if opts.nssh_reset {
-		fmt.Print("Placeholder: --reset not implemented yet.\n")
-		screen_string = "nssh PLACEHOLDER --reset"
-	} else if opts.comment != "" {
-		screen_string = fmt.Sprintf("%s [%s]", os.Args[1], opts.comment)
-	} else {
-		screen_string = os.Args[len(os.Args)-1]
+		resetNsshNode(opts.dsh_list)
+		return
 	}
 
-	fmt.Printf("\033k%s\033\\", screen_string)
+	if opts.comment != "" {
+		fmt.Printf("\033k%s [%s]\033\\", opts.hostname, opts.comment)
+	} else {
+		fmt.Printf("\033k%s\033\\", opts.hostname)
+	}
+
+	if len(opts.ssh_args) == 0 && opts.hostname == "" {
+		log.Fatal("not enough arguments for ssh\n")
+	}
 
 	ssh, err := exec.LookPath("ssh")
-	if err != nil { panic("Cannot locate the ssh binary.") }
+	if err != nil {
+		panic("Cannot locate the ssh binary.")
+	}
 
-	execLocalCommand(ssh, opts.ssh_args)
+	execLocalCommand(ssh, append(opts.ssh_args, opts.hostname))
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4

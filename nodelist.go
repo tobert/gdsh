@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -15,17 +14,21 @@ type Node struct {
 	rank              int
 }
 
-func LoadMachineListByName(name string) (node_list []Node) {
-	machine_lists, _ := ListMachineLists()
+func LoadNodeListByName(name string) (node_list []Node) {
+	node_lists, _ := ListNodeLists()
 
-	for _, mlist := range machine_lists {
-		fmt.Printf("mlist: %s\n", mlist)
+	for _, listPath := range node_lists {
+		listName := strings.TrimLeft(path.Base(listPath), "machines.")
+		if listName == name {
+			dshList, _ := ReadNodeList(listPath)
+			return dshList
+		}
 	}
 
 	return
 }
 
-func ListMachineLists() (lists []string, err error) {
+func ListNodeLists() (lists []string, err error) {
 	gdshd := path.Join(os.Getenv("HOME"), ".gdsh")
 	stat, err := os.Stat(gdshd)
 
@@ -55,7 +58,7 @@ func ListMachineLists() (lists []string, err error) {
 	return lists, err
 }
 
-func ReadMachineList(path string) (node_list []Node, err error) {
+func ReadNodeList(path string) (node_list []Node, err error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		return
