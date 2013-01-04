@@ -40,8 +40,12 @@ func loadNsshPlaceholders() (ph NsshPlaceholderList, err error) {
 	return
 }
 
-func saveNsshPlaceholders() (ph NsshPlaceholderList) {
-	return nil
+func saveNsshPlaceholders(ph NsshPlaceholderList) {
+	jsonBytes, err := json.Marshal(&ph)
+	if err == nil {
+		ioutil.WriteFile(nsshPlaceholderFile(), jsonBytes, 0644)
+	}
+	log.Fatal("BUG: could not persist placeholder data: ", err)
 }
 
 func nextNsshNode(dshListName string) (node Node) {
@@ -60,6 +64,8 @@ func nextNsshNode(dshListName string) (node Node) {
 					if i == len(dshList)-1 {
 						log.Fatal("Already at last node in list '%s'\n", dshListName)
 					} else {
+						ph.Node = dshList[i+1].hostname
+						saveNsshPlaceholders(placeholders)
 						return dshList[i+1]
 					}
 				}
@@ -67,8 +73,11 @@ func nextNsshNode(dshListName string) (node Node) {
 		}
 	}
 
-	log.Fatal("no next node found\n")
-	return
+	// no placeholder found, create one
+	var ph = NsshPlaceholder{dshListName, dshList[0].hostname}
+	saveNsshPlaceholders(append(placeholders, ph))
+
+	return dshList[0]
 }
 
 func resetNsshNode(dshListName string) {
@@ -117,7 +126,7 @@ func ParseOptions() (opts nsshOptions) {
 			opts.nssh_reset = true
 		} else if user_at_re.MatchString(arg) {
 			parts := strings.SplitN(arg, "@", 2)
-			opts.ssh_args = append(opts.ssh_args, "-o", fmt.Sprintf("'User %s'", parts[0]))
+			opts.ssh_args = append(opts.ssh_args, "-o", fmt.Sprintf("User %s", parts[0]))
 			opts.hostname = parts[1]
 		} else {
 			// all that remains at this point is the hostname or some new ssh

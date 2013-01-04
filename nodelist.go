@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"bufio"
 	"io"
 	"os"
@@ -25,6 +26,7 @@ func LoadNodeListByName(name string) (node_list []Node) {
 		}
 	}
 
+	log.Fatal("No list found by the name of '", name, "'\n")
 	return
 }
 
