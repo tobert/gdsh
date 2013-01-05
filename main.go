@@ -11,7 +11,7 @@ func supportedCommand(command string) bool {
 	switch command {
 	case "nssh":
 		return true
-	case "local":
+	case "run":
 		return true
 	}
 	return false
@@ -31,6 +31,8 @@ func main() {
 	switch command {
 	case "nssh":
 		NamedScreenSSHWrapper()
+	case "run":
+		RunRemote()
 	default:
 		log.Fatal(fmt.Sprintf("unsupported call to gdsh: %s\n", os.Args))
 	}
