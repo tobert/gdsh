@@ -12,7 +12,7 @@ import (
 
 type Node struct {
 	Address, Comment string
-	rank              int
+	rank             int
 }
 
 func loadListByName(name string) (list []Node) {

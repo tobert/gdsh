@@ -4,20 +4,20 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"path"
 	"os"
+	"path"
 )
 
 func placeholderFile() string {
 	return path.Join(os.Getenv("HOME"), ".gdsh", ".nssh-next.json")
 }
 
-func loadPlaceholder() (ph map[string] string) {
+func loadPlaceholder() (ph map[string]string) {
 	jsonBytes, err := ioutil.ReadFile(placeholderFile())
 	if os.IsNotExist(err) {
 		// placeholder doesn't exist, return emtpy data structure
 		// that will get persisted before the first item is returned
-		ph = map[string] string{}
+		ph = map[string]string{}
 		return
 	} else if err != nil {
 		log.Fatal("Could not read placeholder: %s", err)
@@ -31,7 +31,7 @@ func loadPlaceholder() (ph map[string] string) {
 	return
 }
 
-func savePlaceholder(ph map[string] string) {
+func savePlaceholder(ph map[string]string) {
 	jsonBytes, err := json.Marshal(&ph)
 	if err == nil {
 		ioutil.WriteFile(placeholderFile(), jsonBytes, 0644)
@@ -52,7 +52,7 @@ func nextNode(listName string) (node Node) {
 
 	if previous, ok := ph[listName]; ok {
 		for i, node := range list {
-			if i == len(list) - 1 {
+			if i == len(list)-1 {
 				log.Fatal("Already at last node in list '%s'\n", listName)
 			} else if node.Address == previous {
 				ph[listName] = list[i+1].Address

@@ -71,7 +71,7 @@ func NamedScreenSSHWrapper(gdshOpts GdshOptions) int {
 	}
 
 	if gdshOpts.Comment != "" {
-		nameScreen(fmt.Sprintf("%s [%s]",gdshOpts.Node, gdshOpts.Comment))
+		nameScreen(fmt.Sprintf("%s [%s]", gdshOpts.Node, gdshOpts.Comment))
 	} else {
 		nameScreen(gdshOpts.Node)
 	}

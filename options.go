@@ -18,7 +18,7 @@ type GdshOptions struct {
 	Key      string   // --key <path>
 	User     string   // --user <username>
 	Node     string   // --node <hostname>
-	Args    []string // leftover arguments for subcommands
+	Args     []string // leftover arguments for subcommands
 }
 
 func deleteArg(index int) (args []string) {
