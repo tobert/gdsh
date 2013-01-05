@@ -1,20 +1,20 @@
 package main
 
 import (
-	"os"
-	"fmt"
-	"log"
-	"io/ioutil"
 	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
 	"text/template"
 )
 
 type runRemoteOptions struct {
 	LocalScriptPath, CommandString string
-	LocalLogPath, RemoteLogPath string
-	MaxJobs int
-	BackgroundRemoteJob bool
-	Env map[string] string
+	LocalLogPath, RemoteLogPath    string
+	MaxJobs                        int
+	BackgroundRemoteJob            bool
+	Env                            map[string]string
 }
 
 // rather than directly executing commands, push a shell script
@@ -63,7 +63,7 @@ func RunRemote() {
 	var opt runRemoteOptions
 	flag.Parse()
 
-	opt.Env = map[string] string { "test": "foo", "bar": "baz" }
+	opt.Env = map[string]string{"test": "foo", "bar": "baz"}
 
 	script := generateCommandScript(opt)
 	log.Print(script)
