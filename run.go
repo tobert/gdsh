@@ -10,10 +10,10 @@ import (
 )
 
 type runRemoteOptions struct {
-	localScriptPath, commandString string
-	localLogPath, remoteLogPath string
-	maxJobs int
-	backgroundRemoteJob bool
+	LocalScriptPath, CommandString string
+	LocalLogPath, RemoteLogPath string
+	MaxJobs int
+	BackgroundRemoteJob bool
 	Env map[string] string
 }
 
@@ -29,14 +29,14 @@ EXIT=0
 export {{$k}}={{$v}}
 {{end}}
 
-{{if .backgroundRemoteJob}}
-nohup {{.commandString}} &
+{{if .BackgroundRemoteJob}}
+nohup {{.CommandString}} &
 {{else}}
-{{.commandString}}
+{{.CommandString}}
 {{end}}
 EXIT=$?
 
-rm -f {{.remoteScriptPath}}
+rm -f {{.RemoteScriptPath}}
 exit $EXIT
 `
 
