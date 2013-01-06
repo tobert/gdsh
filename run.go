@@ -59,14 +59,18 @@ func generateCommandScript(options runRemoteOptions) (localScriptPath string) {
 	return
 }
 
-func RunRemote() {
+func RunRemote(gdshOpts GdshOptions) int {
 	var opt runRemoteOptions
+
+	flag.StringVar(&opt.LocalScriptPath, "script", "", "local script to push and execute")
 	flag.Parse()
 
 	opt.Env = map[string]string{"test": "foo", "bar": "baz"}
 
 	script := generateCommandScript(opt)
 	log.Print(script)
+
+	return 1
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4

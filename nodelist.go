@@ -11,18 +11,19 @@ import (
 )
 
 type Node struct {
-	hostname, comment string
+	Address, Comment string
 	rank              int
 }
 
-func LoadNodeListByName(name string) (node_list []Node) {
-	node_lists, _ := ListNodeLists()
+func loadListByName(name string) (list []Node) {
+	lists := listLists()
 
-	for _, listPath := range node_lists {
-		listName := path.Base(listPath)[6:] //, "nodes.")
+	for _, listPath := range lists {
+		// blindly chop off ^nodes.
+		listName := path.Base(listPath)[6:]
 		if listName == name {
-			dshList, _ := ReadNodeList(listPath)
-			return dshList
+			list = readList(listPath)
+			return
 		}
 	}
 
@@ -30,7 +31,7 @@ func LoadNodeListByName(name string) (node_list []Node) {
 	return
 }
 
-func ListNodeLists() (lists []string, err error) {
+func listLists() (lists []string) {
 	gdshd := path.Join(os.Getenv("HOME"), ".gdsh")
 	stat, err := os.Stat(gdshd)
 
@@ -58,10 +59,10 @@ func ListNodeLists() (lists []string, err error) {
 	}
 
 	err = filepath.Walk(gdshd, visitor)
-	return lists, err
+	return
 }
 
-func ReadNodeList(path string) (node_list []Node, err error) {
+func readList(path string) (list []Node) {
 	fd, err := os.Open(path)
 	if err != nil {
 		return
@@ -76,19 +77,19 @@ func ReadNodeList(path string) (node_list []Node, err error) {
 
 		node.rank = line_no
 		parts := strings.SplitN(strings.Trim(line, "\n"), "#", 2)
-		node.hostname = strings.Trim(parts[0], " ")
+		node.Address = strings.Trim(parts[0], " ")
 
 		if len(parts) == 2 {
-			node.comment = strings.Trim(parts[1], " ")
+			node.Comment = strings.Trim(parts[1], " ")
 		}
 
-		node_list = append(node_list, node)
+		list = append(list, node)
 
 		line, err = buf.ReadString('\n')
 		line_no++
 	}
 
-	return node_list, err
+	return list
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4

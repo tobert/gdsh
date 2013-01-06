@@ -1,41 +1,31 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path"
 )
 
-func supportedCommand(command string) bool {
-	switch command {
-	case "nssh":
-		return true
-	case "run":
-		return true
-	}
-	return false
+var supportedCommands = map[string]func(GdshOptions) int{
+	"nssh": NamedScreenSSHWrapper,
+	"run":  RunRemote,
 }
 
 func main() {
-	var command string
-
-	if cmd := path.Base(os.Args[0]); supportedCommand(cmd) {
-		command = cmd
-	} else if len(os.Args) > 1 && supportedCommand(os.Args[1]) {
-		command = os.Args[1]
-	} else {
-		log.Fatal(fmt.Sprintf("unsupported call to gdsh: %s\n", os.Args))
+	if fun, ok := supportedCommands[path.Base(os.Args[0])]; ok {
+		// multi-call binary
+		opt := parseCommonArgs(os.Args)
+		os.Exit(fun(opt))
+	} else if len(os.Args) > 1 {
+		// gdsh run --args style
+		if fun, ok := supportedCommands[os.Args[1]]; ok {
+			args := deleteArg(1)
+			opt := parseCommonArgs(args)
+			os.Exit(fun(opt))
+		}
 	}
 
-	switch command {
-	case "nssh":
-		NamedScreenSSHWrapper()
-	case "run":
-		RunRemote()
-	default:
-		log.Fatal(fmt.Sprintf("unsupported call to gdsh: %s\n", os.Args))
-	}
+	log.Fatal("unsupported call to gdsh: %s\n", os.Args)
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
