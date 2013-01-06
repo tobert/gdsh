@@ -1,46 +1,73 @@
+// Copyright 2013 Albert P. Tobey. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// references: http://dave.cheney.net/tag/golang
+
 package main
 
-// thanks to: http://dave.cheney.net/tag/golang
-
 import (
+	"bufio"
 	"code.google.com/p/go.crypto/ssh"
-	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 )
 
-type sshConnection struct {
-	command chan string
+// SshCmd bundles a command and its environment together over channels
+type SshCmd struct {
+	command string
+	env map[string]string
+}
+
+// SshConn is an ssh connection and channels for communicating with it,
+// IO pipes are proxied through the channels, so to write to
+// a process's stdin, write to the stdin channel in this struct
+type sshConn struct {
+	address string
+	ssh     *ssh.ClientConn
+	command chan SshCmd
 	stdin   chan string
 	stdout  chan string
 	stderr  chan string
+	ready   chan string
+	done    chan string
 }
 
-func NewSshConnection() *sshConnection {
-	ret := sshConnection{
-		make(chan string),
-		make(chan string),
-		make(chan string),
-		make(chan string),
+// SshConnMgr represents a collection of ssh connections
+type SshConnMgr struct {
+	conns map[string]*sshConn
+	auth *[]ssh.ClientAuth
+}
+
+// NewSshConn returns a new sshConn with channels pre-made
+func NewSshConn(address string, ssh *ssh.ClientConn) (*sshConn) {
+	return &sshConn{
+		address,             // address
+		ssh,                 // ssh
+		make(chan SshCmd),   // command
+		make(chan string),   // stdin
+		make(chan string),   // stdout
+		make(chan string),   // stderr
+		make(chan string),   // ready
+		make(chan string),   // done
 	}
-	return &ret
 }
 
-func connectNode(address string, gdshOptions GdshOptions, conn *sshConnection) {
-	// TODO: allow setting port, or detect it from the list file
-	sshHost := fmt.Sprintf("%s:22", address)
-	agentSock := os.Getenv("SSH_AUTH_SOCK")
+// NewSshConnMgr initialize a new connection manager with a keyring and ssh-agent
+func NewSshConnMgr(key string) (mgr *SshConnMgr) {
+	mgr = &SshConnMgr{}
+	mgr.conns = map[string]*sshConn{}
 	auth := []ssh.ClientAuth{}
-	privKey := gdshOptions.Key
-	user := gdshOptions.User
+	agentSock := os.Getenv("SSH_AUTH_SOCK")
 
 	// only load a private key if requested ~/.ssh/id_rsa is _not_ loaded automatically
 	// ssh-agent should be the usual path
-	if privKey != "" {
+	if key != "" {
 		kr := new(keyring)
-		if err := kr.loadPEM(privKey); err != nil {
-			log.Fatal("Couldn't load specified private key '", privKey, "': ", err)
+		if err := kr.loadPEM(key); err != nil {
+			log.Fatal("Couldn't load specified private key '", key, "': ", err)
 		}
 		auth = append(auth, ssh.ClientAuthKeyring(kr))
 	}
@@ -56,60 +83,149 @@ func connectNode(address string, gdshOptions GdshOptions, conn *sshConnection) {
 		auth = append(auth, ssh.ClientAuthAgent(agent))
 	}
 
-	config := &ssh.ClientConfig{
-		User: user,
-		Auth: auth,
-	}
-
-	remote, err := ssh.Dial("tcp", sshHost, config)
-	if err != nil {
-		log.Fatal("ssh connection to ", sshHost, " failed: ", err)
-	}
-
-	for {
-		log.Printf("going to wait [%s]\n", sshHost)
-
-		command := <-conn.command
-
-		go func() {
-			sess, err := remote.NewSession()
-			if err != nil {
-				// maybe not fatal in the future?
-				log.Fatal("[", sshHost, "] session creation failed: ", err)
-			}
-			defer sess.Close()
-
-			for k, v := range gdshOptions.Env {
-				sess.Setenv(k, v)
-			}
-
-			if err := sess.Run(command); err != nil {
-				log.Fatal("[", sshHost, "] command failed: ", err)
-			} else {
-				log.Printf("[%s] executed command: %v %v\n", sshHost, command, sess)
-			}
-		}()
-	}
-
-	msg := fmt.Sprintf("all set: %s %v %s ----------\n", config, remote, err)
-	conn.stdout <- msg
+	mgr.auth = &auth
+	return
 }
 
-func connectAll(gdshOptions GdshOptions) map[string]sshConnection {
-	conns := map[string]sshConnection{}
-	conn := NewSshConnection()
+func (mgr *SshConnMgr) runCmdAll(command SshCmd) {
+	for _, conn := range mgr.conns {
+		conn.command <-command
+	}
+	for _, conn := range mgr.conns {
+		<-conn.done
+	}
+}
 
-	if gdshOptions.Node != "" {
-		conns[gdshOptions.Node] = *conn
-		go connectNode(gdshOptions.Node, gdshOptions, conn)
-	} else {
-		list := loadListByName(gdshOptions.List)
-		for _, node := range list {
-			conns[node.Address] = *conn
-			go connectNode(node.Address, gdshOptions, conn)
+func (mgr *SshConnMgr) runCmdOne(address string, command SshCmd) {
+	log.Printf("[%s] runCmdOne %s\n", address, command)
+	mgr.conns[address].command <-command
+}
+
+// stopAll sends a 'done' message to each connections' goroutine so
+// it will exit cleanly
+func (mgr *SshConnMgr) stopAll() {
+	for name, conn := range mgr.conns {
+		log.Printf("[%s] sending done message ...\n", name)
+		conn.done <- "done"
+	}
+
+	// wait for confirmation
+	for name, conn := range mgr.conns {
+		<-conn.done
+		log.Printf("[%s] done message acked. Done!\n", name)
+	}
+}
+
+// connectList tells the connection manager to connect to all nodes in the
+// provided list of addresses
+// expects a list of ssh addresses in address:port format
+func (mgr *SshConnMgr) connectList(list []string, user string, key string) {
+	conns := []*sshConn{}
+
+	for _, address := range list {
+		conn := NewSshConn(address, nil)
+
+		config := &ssh.ClientConfig{
+			User: user,
+			Auth: *mgr.auth,
+		}
+
+		go conn.handleConnection(config)
+
+		mgr.conns[address] = conn
+		conns = append(conns, conn)
+	}
+
+	// now wait for them all to become ready, use a local list
+	// to allow connectList() to be called multiple times safely
+	for _, conn := range conns {
+		<-conn.ready
+	}
+}
+
+func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
+	ssh, err := ssh.Dial("tcp", conn.address, config)
+	if err != nil {
+		log.Fatal("ssh connection to ", conn.address, " failed: ", err)
+	}
+
+	conn.ssh = ssh
+	conn.ready <-"ready"
+
+	for {
+		log.Printf("going to wait [%s]\n", conn.address)
+
+		select {
+		case command, _ := <-conn.command:
+			conn.RunCommand(command)
+		case <-conn.done:
+			conn.done <-"ack"
+			break
 		}
 	}
-	return conns
+}
+
+// RunCommand runs a single command on the remote host. A session
+// is set up, IO wired to the connection object's channels, environment
+// pushed, then execution & wait.
+func (conn *sshConn) RunCommand(command SshCmd) {
+	sess, err := conn.ssh.NewSession()
+	if err != nil {
+		// maybe not fatal in the future?
+		log.Fatal("[", conn.address, "] session creation failed: ", err)
+	}
+	defer sess.Close()
+	log.Printf("session started\n")
+
+	for k, v := range command.env {
+		sess.Setenv(k, v)
+	}
+	log.Printf("session environment set\n")
+
+	stdin, _ := sess.StdinPipe()
+	go forwardToFd(stdin, conn.stdin)
+	defer stdin.Close()
+	log.Printf("stdin forwarder started\n")
+
+	stdout, _ := sess.StdoutPipe()
+	go forwardFromFd(stdout, conn.stdout, "stdout")
+	log.Printf("stdout forwarder started\n")
+
+	stderr, _ := sess.StderrPipe()
+	go forwardFromFd(stderr, conn.stderr, "stderr")
+	log.Printf("stderr forwarder started\n")
+
+
+	if err := sess.Start(command.command); err != nil {
+		log.Fatal("[", conn.address, "] command failed: ", err)
+	} else {
+		log.Printf("[%s] executed command: %v %v\n", conn.address, command, sess)
+	}
+
+	sess.Wait()
+	conn.done <-command.command
+}
+
+func forwardFromFd(fd io.Reader, to chan string, name string) {
+	bfd := bufio.NewReader(fd)
+	log.Printf("[%s] forwarding\n", name)
+
+	for {
+		line, err := bfd.ReadString('\n')
+		if err == io.EOF {
+			log.Printf("[%s] EOF\n", name)
+			return
+		}
+		log.Printf("[%s] %s", name, line)
+		to <- string(line)
+	}
+}
+
+func forwardToFd(fd io.Writer, from chan string) {
+	for {
+		stdin := <-from
+		fd.Write([]byte(stdin))
+	}
 }
 
 /*

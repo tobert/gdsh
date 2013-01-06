@@ -68,13 +68,20 @@ func generateCommandScript(gdshOpts GdshOptions) (localScriptPath string) {
 }
 
 func RunRemote(gdshOpts GdshOptions) int {
-	conns := connectAll(gdshOpts)
+	conns := NewSshConnMgr(gdshOpts.Key)
+	conns.connectList(gdshOpts.sshAddressList(), gdshOpts.User, gdshOpts.Key)
+	log.Printf("connected\n")
+
 	generateCommandScript(gdshOpts)
 
-	conns["localhost"].command <- gdshOpts.Command
-	test := <-conns["localhost"].stdout
-	log.Printf("OK!: %s", test)
+	//conns["localhost"].command <- gdshOpts.Command
+	//test := <-conns["localhost"].stdout
+	log.Printf("OK!: %s", conns)
+	if gdshOpts.Command != "" {
+		conns.runCmdAll(SshCmd{gdshOpts.Command, gdshOpts.Env})
+	}
 
+	conns.stopAll()
 	return 1
 }
 

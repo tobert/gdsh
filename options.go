@@ -163,11 +163,20 @@ func parseArgs(args []string, command string) (opt GdshOptions) {
 		}
 	}
 
-	//opt.Env = env
-
 	log.Printf("Options: %s\n", opt)
 
 	return
+}
+
+func (opt *GdshOptions) sshAddressList() (list []string) {
+	list = []string{}
+	nodes := loadListByName(opt.List)
+
+	for _, node := range nodes {
+		list = append(list, fmt.Sprintf("%s:22", node.Address))
+	}
+
+	return list
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
