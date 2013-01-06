@@ -1,4 +1,5 @@
 package main
+
 // gdsh option parsing - a custom parser is implemented because the
 // few packages I checked out didn't do what I want, or ended up being
 // really clunky to do some of the uglier bits of what gdsh needs

@@ -1,67 +1,24 @@
 package main
+
 // thanks to: http://dave.cheney.net/tag/golang
 
 import (
+	"code.google.com/p/go.crypto/ssh"
 	"fmt"
 	"log"
 	"net"
-	"code.google.com/p/go.crypto/ssh"
-	"crypto"
-	"crypto/rsa"
-	"crypto/sha1"
-	"crypto/x509"
-	"encoding/pem"
 	"os"
-	"io"
-	"io/ioutil"
 )
 
 type sshCommand struct {
 	command string
-	args []string
+	args    []string
 }
 
 type sshConnection struct {
 	command chan sshCommand
-	stdout chan string
-	stderr chan string
-}
-
-type keyring struct {
-	keys []*rsa.PrivateKey
-}
-
-func (k *keyring) Key(i int) (interface {}, error) {
-	if i < 0 || i >= len(k.keys) {
-		return nil, nil
-	}
-	return k.keys[i].PublicKey, nil
-}
-
-func (k *keyring) Sign(i int, rand io.Reader, data []byte) ([]byte, error) {
-	hash := sha1.New()
-	hash.Write(data)
-	return rsa.SignPKCS1v15(rand, k.keys[i], crypto.SHA1, hash.Sum(nil))
-}
-
-func (k *keyring) loadPEM(file string) error {
-	pemBytes, err := ioutil.ReadFile(file)
-	if err != nil {
-		log.Fatal("Could not load keyfile '", file, "': ", err)
-	}
-
-	block, comment := pem.Decode(pemBytes)
-	if block == nil {
-		log.Fatal("Could not parse keyfile '", file, "' (", comment, "): ", err)
-	}
-
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		log.Fatal("Could not parse keyfile '", file, "': ", err)
-	}
-
-	k.keys = append(k.keys, privateKey)
-	return nil
+	stdout  chan string
+	stderr  chan string
 }
 
 func connectNode(address string, user string, privKey string, conn sshConnection) {
@@ -106,7 +63,7 @@ func connectNode(address string, user string, privKey string, conn sshConnection
 
 		request := <-conn.command
 
-		go func () {
+		go func() {
 			sess, err := remote.NewSession()
 			if err != nil {
 				// maybe not fatal in the future?
@@ -126,7 +83,7 @@ func connectNode(address string, user string, privKey string, conn sshConnection
 	conn.stdout <- msg
 }
 
-func connectAll(gdshOptions GdshOptions) (map[string]sshConnection) {
+func connectAll(gdshOptions GdshOptions) map[string]sshConnection {
 	conns := map[string]sshConnection{}
 	conn := sshConnection{
 		make(chan sshCommand),
