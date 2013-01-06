@@ -12,7 +12,7 @@ import (
 // parse command line options, recognizing common ssh options and saving them
 // while extracting nssh's options and, hopefully, the hostname that can be
 // infixed, e.g. ssh foobar.com -l tobert
-func parseNsshOptions(gdshOpts GdshOptions) (ssh_args []string) {
+func parseNsshOptions(gdshOpts *GdshOptions) (ssh_args []string) {
 	// we don't actually care about what the ssh options mean, they only
 	// need to be recognized and eliminated so the hostname can be found
 	no_arg_re, err := regexp.Compile("^-[1246AaCfgKkMNnqsTtVvXxY]$")
@@ -30,20 +30,20 @@ func parseNsshOptions(gdshOpts GdshOptions) (ssh_args []string) {
 		panic("BUG: regular expression compilation failed!")
 	}
 
-	skip_next := true
+	skip := false
 	for i, arg := range gdshOpts.Args {
-		if skip_next {
-			skip_next = false
+		if skip {
+			skip = false
 			continue
-		} else if no_arg_re.MatchString(arg) {
-			ssh_args = append(ssh_args, arg)
-		} else if has_arg_re.MatchString(arg) {
-			ssh_args = append(ssh_args, arg, os.Args[i+1])
-			skip_next = true
 		} else if user_at_re.MatchString(arg) {
 			parts := strings.SplitN(arg, "@", 2)
 			ssh_args = append(ssh_args, "-o", fmt.Sprintf("User %s", parts[0]))
 			gdshOpts.Node = parts[1]
+		} else if no_arg_re.MatchString(arg) {
+			ssh_args = append(ssh_args, arg)
+		} else if has_arg_re.MatchString(arg) {
+			ssh_args = append(ssh_args, arg, os.Args[i+1])
+			skip = true
 		} else {
 			// all that remains at this point is the hostname or some new ssh
 			// option not accounted for in the above REs
@@ -56,7 +56,7 @@ func parseNsshOptions(gdshOpts GdshOptions) (ssh_args []string) {
 
 // doesn't try to detect the terminal or anything, just print the escape code
 func NamedScreenSSHWrapper(gdshOpts GdshOptions) int {
-	ssh_args := parseNsshOptions(gdshOpts)
+	ssh_args := parseNsshOptions(&gdshOpts)
 
 	if gdshOpts.Node != "" {
 		updatePlaceholder(gdshOpts.List, gdshOpts.Node)
@@ -77,7 +77,7 @@ func NamedScreenSSHWrapper(gdshOpts GdshOptions) int {
 	}
 
 	if len(ssh_args) == 0 && gdshOpts.Node == "" {
-		log.Fatal("not enough arguments for ssh\n")
+		log.Fatal("not enough arguments for ssh: (", gdshOpts, "), (", ssh_args, ")\n")
 	}
 
 	ssh, err := exec.LookPath("ssh")
