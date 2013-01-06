@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/user"
 	"strings"
 )
 
@@ -78,9 +77,8 @@ func parseArgs(args []string, command string) (opt GdshOptions) {
 		Env:          env,
 	}
 
-	user, err := user.Current()
-	if err == nil {
-		opt.User = user.Username
+	if opt.User == "" {
+		opt.User = UserIdToUsername(os.Geteuid())
 	}
 
 	skip := true
