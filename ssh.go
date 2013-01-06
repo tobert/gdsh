@@ -87,6 +87,9 @@ func NewSshConnMgr(key string) (mgr *SshConnMgr) {
 	return
 }
 
+// runCmdAll runs an SshCmd on all nodes connected by the manager. It waits for
+// and ack from all of the connections before returning.
+// TODO: timeouts
 func (mgr *SshConnMgr) runCmdAll(command SshCmd) {
 	for _, conn := range mgr.conns {
 		conn.command <-command
@@ -96,9 +99,13 @@ func (mgr *SshConnMgr) runCmdAll(command SshCmd) {
 	}
 }
 
+// runCmdOne runs an SshCmd on one node that must already be connected by the
+// connection manager
 func (mgr *SshConnMgr) runCmdOne(address string, command SshCmd) {
 	log.Printf("[%s] runCmdOne %s\n", address, command)
-	mgr.conns[address].command <-command
+	conn := mgr.conns[address]
+	conn.command <-command
+	<-conn.done
 }
 
 // stopAll sends a 'done' message to each connections' goroutine so
