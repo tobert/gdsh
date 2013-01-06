@@ -18,7 +18,7 @@ import (
 // SshCmd bundles a command and its environment together over channels
 type SshCmd struct {
 	command string
-	env map[string]string
+	env     map[string]string
 }
 
 // SshConn is an ssh connection and channels for communicating with it,
@@ -38,20 +38,20 @@ type sshConn struct {
 // SshConnMgr represents a collection of ssh connections
 type SshConnMgr struct {
 	conns map[string]*sshConn
-	auth *[]ssh.ClientAuth
+	auth  *[]ssh.ClientAuth
 }
 
 // NewSshConn returns a new sshConn with channels pre-made
-func NewSshConn(address string, ssh *ssh.ClientConn) (*sshConn) {
+func NewSshConn(address string, ssh *ssh.ClientConn) *sshConn {
 	return &sshConn{
-		address,             // address
-		ssh,                 // ssh
-		make(chan SshCmd),   // command
-		make(chan string),   // stdin
-		make(chan string),   // stdout
-		make(chan string),   // stderr
-		make(chan string),   // ready
-		make(chan string),   // done
+		address,           // address
+		ssh,               // ssh
+		make(chan SshCmd), // command
+		make(chan string), // stdin
+		make(chan string), // stdout
+		make(chan string), // stderr
+		make(chan string), // ready
+		make(chan string), // done
 	}
 }
 
@@ -92,7 +92,7 @@ func NewSshConnMgr(key string) (mgr *SshConnMgr) {
 // TODO: timeouts
 func (mgr *SshConnMgr) RunCmdAll(command SshCmd) {
 	for _, conn := range mgr.conns {
-		conn.command <-command
+		conn.command <- command
 	}
 	for _, conn := range mgr.conns {
 		<-conn.done
@@ -104,7 +104,7 @@ func (mgr *SshConnMgr) RunCmdAll(command SshCmd) {
 func (mgr *SshConnMgr) RunCmdOne(address string, command SshCmd) {
 	log.Printf("[%s] runCmdOne %s\n", address, command)
 	conn := mgr.conns[address]
-	conn.command <-command
+	conn.command <- command
 	<-conn.done
 }
 
@@ -160,7 +160,7 @@ func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
 	}
 
 	conn.ssh = ssh
-	conn.ready <-"ready"
+	conn.ready <- "ready"
 
 	for {
 		log.Printf("going to wait [%s]\n", conn.address)
@@ -169,7 +169,7 @@ func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
 		case command, _ := <-conn.command:
 			conn.runCommandSession(command)
 		case <-conn.done:
-			conn.done <-"ack"
+			conn.done <- "ack"
 			break
 		}
 	}
@@ -205,7 +205,6 @@ func (conn *sshConn) runCommandSession(command SshCmd) {
 	go forwardFromFd(stderr, conn.stderr, "stderr")
 	log.Printf("stderr forwarder started\n")
 
-
 	if err := sess.Start(command.command); err != nil {
 		log.Fatal("[", conn.address, "] command failed: ", err)
 	} else {
@@ -213,7 +212,7 @@ func (conn *sshConn) runCommandSession(command SshCmd) {
 	}
 
 	sess.Wait()
-	conn.done <-command.command
+	conn.done <- command.command
 }
 
 func forwardFromFd(fd io.Reader, to chan string, name string) {
