@@ -90,7 +90,7 @@ func NewSshConnMgr(key string) (mgr *SshConnMgr) {
 // runCmdAll runs an SshCmd on all nodes connected by the manager. It waits for
 // and ack from all of the connections before returning.
 // TODO: timeouts
-func (mgr *SshConnMgr) runCmdAll(command SshCmd) {
+func (mgr *SshConnMgr) RunCmdAll(command SshCmd) {
 	for _, conn := range mgr.conns {
 		conn.command <-command
 	}
@@ -101,7 +101,7 @@ func (mgr *SshConnMgr) runCmdAll(command SshCmd) {
 
 // runCmdOne runs an SshCmd on one node that must already be connected by the
 // connection manager
-func (mgr *SshConnMgr) runCmdOne(address string, command SshCmd) {
+func (mgr *SshConnMgr) RunCmdOne(address string, command SshCmd) {
 	log.Printf("[%s] runCmdOne %s\n", address, command)
 	conn := mgr.conns[address]
 	conn.command <-command
@@ -110,7 +110,7 @@ func (mgr *SshConnMgr) runCmdOne(address string, command SshCmd) {
 
 // stopAll sends a 'done' message to each connections' goroutine so
 // it will exit cleanly
-func (mgr *SshConnMgr) stopAll() {
+func (mgr *SshConnMgr) StopAll() {
 	for name, conn := range mgr.conns {
 		log.Printf("[%s] sending done message ...\n", name)
 		conn.done <- "done"
@@ -126,7 +126,7 @@ func (mgr *SshConnMgr) stopAll() {
 // connectList tells the connection manager to connect to all nodes in the
 // provided list of addresses
 // expects a list of ssh addresses in address:port format
-func (mgr *SshConnMgr) connectList(list []string, user string, key string) {
+func (mgr *SshConnMgr) ConnectList(list []string, user string, key string) {
 	conns := []*sshConn{}
 
 	for _, address := range list {
@@ -150,6 +150,9 @@ func (mgr *SshConnMgr) connectList(list []string, user string, key string) {
 	}
 }
 
+// handleConnection actually connects to the remote machine then sends
+// a "ready" on the ready channel so this can be run in goroutines
+// and safely waited upon after firing off a bunch of them
 func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
 	ssh, err := ssh.Dial("tcp", conn.address, config)
 	if err != nil {
@@ -164,7 +167,7 @@ func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
 
 		select {
 		case command, _ := <-conn.command:
-			conn.RunCommand(command)
+			conn.runCommandSession(command)
 		case <-conn.done:
 			conn.done <-"ack"
 			break
@@ -172,10 +175,10 @@ func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
 	}
 }
 
-// RunCommand runs a single command on the remote host. A session
+// runCommandSession runs a single command on the remote host. A session
 // is set up, IO wired to the connection object's channels, environment
 // pushed, then execution & wait.
-func (conn *sshConn) RunCommand(command SshCmd) {
+func (conn *sshConn) runCommandSession(command SshCmd) {
 	sess, err := conn.ssh.NewSession()
 	if err != nil {
 		// maybe not fatal in the future?
