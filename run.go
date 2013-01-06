@@ -71,8 +71,7 @@ func RunRemote(gdshOpts GdshOptions) int {
 	conns := connectAll(gdshOpts)
 	generateCommandScript(gdshOpts)
 
-	cmd := sshCommand{"/bin/true", []string{}}
-	conns["localhost"].command <- cmd
+	conns["localhost"].command <- gdshOpts.Command
 	test := <-conns["localhost"].stdout
 	log.Printf("OK!: %s", test)
 
