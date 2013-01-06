@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,19 +8,12 @@ import (
 	"text/template"
 )
 
-type runRemoteOptions struct {
-	LocalScriptPath, CommandString string
-	LocalLogPath, RemoteLogPath    string
-	MaxJobs                        int
-	BackgroundRemoteJob            bool
-	Env                            map[string]string
-}
-
 // rather than directly executing commands, push a shell script
 // to the remote system so it can handle basic IO redirection without
 // forcing a lot of cumbersome escaping on the source system
 var ScriptTemplate string = `#!/bin/bash
 
+cd /
 export DEBIAN_FRONTEND=noninteractive
 EXIT=0
 
@@ -29,14 +21,22 @@ EXIT=0
 export {{$k}}={{$v}}
 {{end}}
 
-{{if .BackgroundRemoteJob}}
-nohup {{.CommandString}} &
+{{if .BgJob}}
+	{{if .RemoteLog}}
+nohup {{.Command}} 2>&1 >{{.RemoteLog}} &
+	{{else}}
+nohup {{.Command}} 2>&1 >/dev/null &
+	{{end}}
 {{else}}
-{{.CommandString}}
+	{{if .RemoteLog}}
+{{.Command}} 2>&1 >{{.RemoteLog}}
+	{{else}}
+{{.Command}}
+	{{end}}
 {{end}}
 EXIT=$?
 
-rm -f {{.RemoteScriptPath}}
+rm -f {{.RemoteScript}}
 exit $EXIT
 `
 
@@ -44,7 +44,7 @@ func runRemoteScript(localScriptPath string) (err error) {
 	return nil
 }
 
-func generateCommandScript(options runRemoteOptions) (localScriptPath string) {
+func generateCommandScript(gdshOpts GdshOptions) (localScriptPath string) {
 	hostname, _ := os.Hostname()
 	tmp, err := ioutil.TempFile("", fmt.Sprintf("%s-", hostname))
 	if err != nil {
@@ -52,23 +52,29 @@ func generateCommandScript(options runRemoteOptions) (localScriptPath string) {
 	}
 	defer tmp.Close()
 
-	t := template.Must(template.New("script").Parse(ScriptTemplate))
-	t.Execute(os.Stdout, options)
+	if gdshOpts.RemoteScript == "" {
+		gdshOpts.RemoteScript = tmp.Name()
+	}
 
-	localScriptPath = tmp.Name()
+	log.Printf("LSP: '%s', C: '%s'", gdshOpts.Script, gdshOpts.Command)
+
+	if gdshOpts.Script == "" && gdshOpts.Command != "" {
+		t := template.Must(template.New("script").Parse(ScriptTemplate))
+		t.Execute(tmp, gdshOpts)
+		tmp.Sync()
+	}
+
 	return
 }
 
 func RunRemote(gdshOpts GdshOptions) int {
-	var opt runRemoteOptions
+	conns := connectAll(gdshOpts)
+	generateCommandScript(gdshOpts)
 
-	flag.StringVar(&opt.LocalScriptPath, "script", "", "local script to push and execute")
-	flag.Parse()
-
-	opt.Env = map[string]string{"test": "foo", "bar": "baz"}
-
-	script := generateCommandScript(opt)
-	log.Print(script)
+	cmd := sshCommand{"/bin/true", []string{}}
+	conns["localhost"].command <- cmd
+	test := <-conns["localhost"].stdout
+	log.Printf("OK!: %s", test)
 
 	return 1
 }
