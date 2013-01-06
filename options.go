@@ -168,6 +168,8 @@ func parseArgs(args []string, command string) (opt GdshOptions) {
 	return
 }
 
+// sshAddressList loads the requested node list and returns a string list
+// of address:port strings that can be used with ssh.go
 func (opt *GdshOptions) sshAddressList() (list []string) {
 	list = []string{}
 	nodes := loadListByName(opt.List)
