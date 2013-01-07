@@ -79,6 +79,9 @@ func parseArgs(args []string, command string) (opt GdshOptions) {
 
 	if opt.User == "" {
 		opt.User = UserIdToUsername(os.Geteuid())
+		if opt.User == "" {
+			log.Fatal("Could not determine username. Use --user or fix your /etc/passwd.")
+		}
 	}
 
 	skip := true
