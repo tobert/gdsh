@@ -11,6 +11,7 @@ import (
 	"code.google.com/p/go.crypto/ssh"
 	"io"
 	"log"
+	"fmt"
 	"net"
 	"os"
 )
@@ -28,9 +29,9 @@ type sshConn struct {
 	address string
 	ssh     *ssh.ClientConn
 	command chan SshCmd
-	stdin   chan string
-	stdout  chan string
-	stderr  chan string
+	stdin   chan []byte
+	stdout  chan []byte
+	stderr  chan []byte
 	ready   chan string
 	done    chan string
 }
@@ -47,9 +48,9 @@ func NewSshConn(address string, ssh *ssh.ClientConn) *sshConn {
 		address,           // address
 		ssh,               // ssh
 		make(chan SshCmd), // command
-		make(chan string), // stdin
-		make(chan string), // stdout
-		make(chan string), // stderr
+		make(chan []byte), // stdin
+		make(chan []byte), // stdout
+		make(chan []byte), // stderr
 		make(chan string), // ready
 		make(chan string), // done
 	}
@@ -106,6 +107,52 @@ func (mgr *SshConnMgr) RunCmdOne(address string, command SshCmd) {
 	conn := mgr.conns[address]
 	conn.command <- command
 	<-conn.done
+}
+
+// ScpToAll scp's a file to all nodes in the manager
+func (mgr *SshConnMgr) ScpAll(local string, remote string) {
+	scp := SshCmd{fmt.Sprintf("/usr/bin/scp -t %s", remote), map[string]string{}}
+	stat, _ := os.Stat(local)
+	scpCommand := fmt.Sprintf("scp: C%#o %d %s\n", stat.Mode() & os.ModePerm, stat.Size(), remote)
+
+	for _, conn := range mgr.conns {
+		conn.command <-scp
+	}
+	for _, conn := range mgr.conns {
+		<-conn.ready
+
+		go func () {
+			conn.stdin <-[]byte(scpCommand)
+			fd, err := os.Open(local)
+			if err != nil {
+				log.Printf("Failed to open local file '%s' for read: %s\n", local, err)
+				return
+			}
+			defer fd.Close()
+
+			var buf []byte
+			bytes, err := fd.Read(buf)
+			for {
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Fatal("file read failed after ", bytes, " bytes: ", err)
+				}
+				conn.stdin <-buf[0:bytes]
+				bytes, err = fd.Read(buf)
+			}
+		}()
+	}
+
+	for _, conn := range mgr.conns {
+		<-conn.done
+		conn.done <-"done"
+		<-conn.done
+	}
+}
+
+func scpTo(source string, dest string) {
+
 }
 
 // stopAll sends a 'done' message to each connections' goroutine so
@@ -211,42 +258,31 @@ func (conn *sshConn) runCommandSession(command SshCmd) {
 		log.Printf("[%s] executed command: %v %v\n", conn.address, command, sess)
 	}
 
+	conn.ready <- command.command
 	sess.Wait()
 	conn.done <- command.command
 }
 
-func forwardFromFd(fd io.Reader, to chan string, name string) {
+func forwardFromFd(fd io.Reader, to chan []byte, name string) {
 	bfd := bufio.NewReader(fd)
 	log.Printf("[%s] forwarding\n", name)
 
 	for {
-		line, err := bfd.ReadString('\n')
+		line, err := bfd.ReadBytes('\n')
 		if err == io.EOF {
 			log.Printf("[%s] EOF\n", name)
 			return
 		}
 		log.Printf("[%s] %s", name, line)
-		to <- string(line)
+		to <-line
 	}
 }
 
-func forwardToFd(fd io.Writer, from chan string) {
+func forwardToFd(fd io.Writer, from chan []byte) {
 	for {
 		stdin := <-from
 		fd.Write([]byte(stdin))
 	}
 }
-
-/*
-	go func() {
-		w, _ := session.StdinPipe()
-		defer w.Close()
-	}()
-	if err := session.Run("/usr/bin/scp -qrt ./"); err != nil {
-		panic("Failed to run: " + err.Error())
-	}
-}
-
-*/
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4

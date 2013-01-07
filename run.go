@@ -44,7 +44,7 @@ func runRemoteScript(localScriptPath string) (err error) {
 	return nil
 }
 
-func generateCommandScript(gdshOpts GdshOptions) (localScriptPath string) {
+func generateCommandScript(gdshOpts GdshOptions) string {
 	hostname, _ := os.Hostname()
 	tmp, err := ioutil.TempFile("", fmt.Sprintf("%s-", hostname))
 	if err != nil {
@@ -61,10 +61,10 @@ func generateCommandScript(gdshOpts GdshOptions) (localScriptPath string) {
 	if gdshOpts.Script == "" && gdshOpts.Command != "" {
 		t := template.Must(template.New("script").Parse(ScriptTemplate))
 		t.Execute(tmp, gdshOpts)
-		tmp.Sync()
+		tmp.Close()
 	}
 
-	return
+	return tmp.Name()
 }
 
 func RunRemote(gdshOpts GdshOptions) int {
@@ -72,12 +72,11 @@ func RunRemote(gdshOpts GdshOptions) int {
 	conns.ConnectList(gdshOpts.sshAddressList(), gdshOpts.User, gdshOpts.Key)
 	log.Printf("connected\n")
 
-	generateCommandScript(gdshOpts)
-
 	//conns["localhost"].command <- gdshOpts.Command
 	//test := <-conns["localhost"].stdout
-	log.Printf("OK!: %s", conns)
 	if gdshOpts.Command != "" {
+		tmp := generateCommandScript(gdshOpts)
+		conns.ScpAll(tmp, tmp)
 		conns.RunCmdAll(SshCmd{gdshOpts.Command, gdshOpts.Env})
 	}
 
