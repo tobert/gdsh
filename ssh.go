@@ -9,11 +9,12 @@ package main
 import (
 	"bufio"
 	"code.google.com/p/go.crypto/ssh"
+	"fmt"
 	"io"
 	"log"
-	"fmt"
 	"net"
 	"os"
+	"sync"
 )
 
 // SshCmd bundles a command and its environment together over channels
@@ -32,8 +33,8 @@ type sshConn struct {
 	stdin   chan []byte
 	stdout  chan []byte
 	stderr  chan []byte
-	ready   chan string
-	done    chan string
+	ready   chan bool
+	done    chan bool
 }
 
 // SshConnMgr represents a collection of ssh connections
@@ -51,8 +52,8 @@ func NewSshConn(address string, ssh *ssh.ClientConn) *sshConn {
 		make(chan []byte), // stdin
 		make(chan []byte), // stdout
 		make(chan []byte), // stderr
-		make(chan string), // ready
-		make(chan string), // done
+		make(chan bool),   // ready
+		make(chan bool),   // done
 	}
 }
 
@@ -111,48 +112,50 @@ func (mgr *SshConnMgr) RunCmdOne(address string, command SshCmd) {
 
 // ScpToAll scp's a file to all nodes in the manager
 func (mgr *SshConnMgr) ScpAll(local string, remote string) {
-	scp := SshCmd{fmt.Sprintf("/usr/bin/scp -t %s", remote), map[string]string{}}
-	stat, _ := os.Stat(local)
-	scpCommand := fmt.Sprintf("scp: C%#o %d %s\n", stat.Mode() & os.ModePerm, stat.Size(), remote)
-
+	wg := sync.WaitGroup{}
 	for _, conn := range mgr.conns {
-		conn.command <-scp
-	}
-	for _, conn := range mgr.conns {
-		<-conn.ready
-
-		go func () {
-			conn.stdin <-[]byte(scpCommand)
-			fd, err := os.Open(local)
-			if err != nil {
-				log.Printf("Failed to open local file '%s' for read: %s\n", local, err)
-				return
-			}
-			defer fd.Close()
-
-			var buf []byte
-			bytes, err := fd.Read(buf)
-			for {
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					log.Fatal("file read failed after ", bytes, " bytes: ", err)
-				}
-				conn.stdin <-buf[0:bytes]
-				bytes, err = fd.Read(buf)
-			}
+		wg.Add(1)
+		go func() {
+			fmt.Print("starting!\n")
+			mgr.scpTo(conn, local, remote)
+			wg.Done()
+			fmt.Print("done!\n")
 		}()
 	}
-
-	for _, conn := range mgr.conns {
-		<-conn.done
-		conn.done <-"done"
-		<-conn.done
-	}
+	wg.Wait()
 }
 
-func scpTo(source string, dest string) {
+// scp a file to one node on the given connection
+func (mgr *SshConnMgr) scpTo(conn *sshConn, local string, remote string) {
+	scp := SshCmd{fmt.Sprintf("/usr/bin/scp -t %s", remote), map[string]string{}}
+	stat, _ := os.Stat(local)
+	scpCommand := fmt.Sprintf("scp: C0500 %d %s\n", stat.Size(), remote)
 
+	conn.command <- scp
+
+	conn.stdin <- []byte(scpCommand)
+	log.Printf("pushed %s to remote stdin\n", scpCommand)
+
+	fd, err := os.Open(local)
+	if err != nil {
+		log.Printf("Failed to open local file '%s' for read: %s\n", local, err)
+		return
+	}
+	defer fd.Close()
+
+	var buf []byte
+	sz, err := fd.Read(buf)
+	for {
+		if sz == 0 || err == io.EOF {
+			break
+		} else if err != nil {
+			log.Fatal("file read failed after ", sz, " bytes: ", err)
+		}
+		fmt.Print("Pushing data to connection stdin ...")
+		conn.stdin <- buf[0:sz]
+		sz, err = fd.Read(buf)
+	}
+	fmt.Print("--- 5\n")
 }
 
 // stopAll sends a 'done' message to each connections' goroutine so
@@ -160,7 +163,7 @@ func scpTo(source string, dest string) {
 func (mgr *SshConnMgr) StopAll() {
 	for name, conn := range mgr.conns {
 		log.Printf("[%s] sending done message ...\n", name)
-		conn.done <- "done"
+		conn.done <- true
 	}
 
 	// wait for confirmation
@@ -175,6 +178,7 @@ func (mgr *SshConnMgr) StopAll() {
 // expects a list of ssh addresses in address:port format
 func (mgr *SshConnMgr) ConnectList(list []string, user string, key string) {
 	conns := []*sshConn{}
+	wg := sync.WaitGroup{}
 
 	for _, address := range list {
 		conn := NewSshConn(address, nil)
@@ -184,39 +188,38 @@ func (mgr *SshConnMgr) ConnectList(list []string, user string, key string) {
 			Auth: *mgr.auth,
 		}
 
-		go conn.handleConnection(config)
+		wg.Add(1)
+		go conn.handleConnection(config, &wg)
 
 		mgr.conns[address] = conn
 		conns = append(conns, conn)
 	}
 
-	// now wait for them all to become ready, use a local list
-	// to allow connectList() to be called multiple times safely
-	for _, conn := range conns {
-		<-conn.ready
-	}
+	wg.Wait()
 }
 
 // handleConnection actually connects to the remote machine then sends
 // a "ready" on the ready channel so this can be run in goroutines
 // and safely waited upon after firing off a bunch of them
-func (conn *sshConn) handleConnection(config *ssh.ClientConfig) {
-	ssh, err := ssh.Dial("tcp", conn.address, config)
+func (conn *sshConn) handleConnection(config *ssh.ClientConfig, wg *sync.WaitGroup) {
+	var err error
+	conn.ssh, err = ssh.Dial("tcp", conn.address, config)
 	if err != nil {
 		log.Fatal("ssh connection to ", conn.address, " failed: ", err)
 	}
 
-	conn.ssh = ssh
-	conn.ready <- "ready"
+	wg.Done()
 
 	for {
 		log.Printf("going to wait [%s]\n", conn.address)
 
 		select {
 		case command, _ := <-conn.command:
-			conn.runCommandSession(command)
+			go conn.runCommandSession(command)
+			<-conn.ready // wait for complete connection setup
 		case <-conn.done:
-			conn.done <- "ack"
+			log.Print("All done!")
+			conn.done <- true
 			break
 		}
 	}
@@ -232,25 +235,19 @@ func (conn *sshConn) runCommandSession(command SshCmd) {
 		log.Fatal("[", conn.address, "] session creation failed: ", err)
 	}
 	defer sess.Close()
-	log.Printf("session started\n")
 
 	for k, v := range command.env {
 		sess.Setenv(k, v)
 	}
-	log.Printf("session environment set\n")
 
 	stdin, _ := sess.StdinPipe()
 	go forwardToFd(stdin, conn.stdin)
-	defer stdin.Close()
-	log.Printf("stdin forwarder started\n")
 
 	stdout, _ := sess.StdoutPipe()
 	go forwardFromFd(stdout, conn.stdout, "stdout")
-	log.Printf("stdout forwarder started\n")
 
 	stderr, _ := sess.StderrPipe()
 	go forwardFromFd(stderr, conn.stderr, "stderr")
-	log.Printf("stderr forwarder started\n")
 
 	if err := sess.Start(command.command); err != nil {
 		log.Fatal("[", conn.address, "] command failed: ", err)
@@ -258,14 +255,13 @@ func (conn *sshConn) runCommandSession(command SshCmd) {
 		log.Printf("[%s] executed command: %v %v\n", conn.address, command, sess)
 	}
 
-	conn.ready <- command.command
+	conn.ready <-true
 	sess.Wait()
-	conn.done <- command.command
+	conn.done <-true
 }
 
 func forwardFromFd(fd io.Reader, to chan []byte, name string) {
 	bfd := bufio.NewReader(fd)
-	log.Printf("[%s] forwarding\n", name)
 
 	for {
 		line, err := bfd.ReadBytes('\n')
@@ -274,14 +270,23 @@ func forwardFromFd(fd io.Reader, to chan []byte, name string) {
 			return
 		}
 		log.Printf("[%s] %s", name, line)
-		to <-line
+		to <- line
 	}
 }
 
 func forwardToFd(fd io.Writer, from chan []byte) {
 	for {
 		stdin := <-from
-		fd.Write([]byte(stdin))
+		log.Printf("[stdin]: %s", stdin)
+		sz, err := fd.Write([]byte(stdin))
+		if sz != len(stdin) {
+			log.Fatal("[stdin] truncated write")
+		}
+
+		if err == io.EOF {
+			log.Print("[stdin] EOF\n")
+			break
+		}
 	}
 }
 
