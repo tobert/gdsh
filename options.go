@@ -164,8 +164,6 @@ func parseArgs(args []string, command string) (opt GdshOptions) {
 		}
 	}
 
-	log.Printf("Options: %s\n", opt)
-
 	return
 }
 
