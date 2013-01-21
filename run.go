@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"text/template"
+	"time"
 )
 
 // rather than directly executing commands, push a shell script
@@ -36,51 +38,35 @@ nohup {{.Command}} 2>&1 >/dev/null &
 {{end}}
 EXIT=$?
 
-rm -f {{.RemoteScript}}
+rm -f $0
 exit $EXIT
 `
 
-func runRemoteScript(localScriptPath string) (err error) {
-	return nil
-}
-
-func generateCommandScript(gdshOpts GdshOptions) string {
-	hostname, _ := os.Hostname()
-	tmp, err := ioutil.TempFile("", fmt.Sprintf("%s-", hostname))
-	if err != nil {
-		log.Fatal("Could not create a tempfile for command script: %s", err)
-	}
-	defer tmp.Close()
-
-	if gdshOpts.RemoteScript == "" {
-		gdshOpts.RemoteScript = tmp.Name()
-	}
-
-	log.Printf("LSP: '%s', C: '%s'", gdshOpts.Script, gdshOpts.Command)
-
-	if gdshOpts.Script == "" && gdshOpts.Command != "" {
-		t := template.Must(template.New("script").Parse(ScriptTemplate))
-		t.Execute(tmp, gdshOpts)
-		tmp.Close()
-	}
-
-	return tmp.Name()
-}
-
 func RunRemote(gdshOpts GdshOptions) int {
+	hostname, _ := os.Hostname()
+	remoteFile := fmt.Sprintf("/tmp/gdsh-script-%s-%d.sh", hostname, time.Now().Unix())
 	conns := NewSshConnMgr(gdshOpts.Key)
 	conns.ConnectList(gdshOpts.sshAddressList(), gdshOpts.User, gdshOpts.Key)
-	log.Printf("connected\n")
 
-	//conns["localhost"].command <- gdshOpts.Command
-	//test := <-conns["localhost"].stdout
+	buf := new(bytes.Buffer)
+
 	if gdshOpts.Command != "" {
-		tmp := generateCommandScript(gdshOpts)
-		conns.ScpAll(tmp, tmp)
-		conns.RunCmdAll(SshCmd{gdshOpts.Command, gdshOpts.Env})
+		t := template.Must(template.New("script").Parse(ScriptTemplate))
+		t.Execute(buf, gdshOpts)
+	} else if gdshOpts.Script != "" {
+		f, err := os.Open(gdshOpts.Script)
+		if err != nil {
+			log.Fatal("Could not read script file '", gdshOpts.Script, "': ", err)
+		}
+		io.Copy(buf, f)
+		f.Close()
 	}
 
+	conns.ScpAll(buf.Bytes(), "0700", remoteFile)
+	conns.RunCmdAll(fmt.Sprintf("/bin/bash %s", remoteFile), gdshOpts.Env)
+
 	conns.StopAll()
+
 	return 1
 }
 
