@@ -42,7 +42,6 @@ func (cmd *SshCmd) Start() (err error) {
 	if err != nil {
 		return
 	}
-	defer sess.Close()
 
 	for k, v := range cmd.Env {
 		sess.Setenv(k, v)
@@ -84,6 +83,7 @@ func (cmd *SshCmd) Running() bool {
 func (cmd *SshCmd) Wait() (rc int) {
 	err := cmd.session.Wait()
 	cmd.running = false
+	cmd.session.Close()
 	if err == nil {
 		return 0
 	}
