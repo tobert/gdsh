@@ -7,6 +7,7 @@
 package gdssh
 
 import (
+	"bufio"
 	"code.google.com/p/go.crypto/ssh"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"strings"
 	"time"
 )
 
@@ -135,7 +137,7 @@ func (conn *Conn) ScpBuf(buf []byte, mode string, remoteFile string) {
 	stdout, _ := sess.StdoutPipe()
 	//stderr, _ := sess.StderrPipe()
 
-	cmd := fmt.Sprintf("/usr/bin/scp -t %s", remoteFile)
+	cmd := fmt.Sprintf("/usr/bin/scp -t -- %s", remoteFile)
 	if err := sess.Start(cmd); err != nil {
 		log.Fatal("[", conn.address, "] command failed: ", err)
 	}
@@ -149,7 +151,7 @@ func (conn *Conn) ScpBuf(buf []byte, mode string, remoteFile string) {
 	err = sess.Wait()
 }
 
-func (conn *Conn) Scp(localFile string, remoteFile string) {
+func (conn *Conn) ScpPush(localFile string, remoteFile string) {
 	f, err := os.Open(localFile)
 	if err != nil {
 		log.Fatal("Could not read local file '", localFile, "': ", err)
@@ -166,7 +168,8 @@ func (conn *Conn) Scp(localFile string, remoteFile string) {
 	stdin, _ := sess.StdinPipe()
 	stdout, _ := sess.StdoutPipe()
 
-	cmd := fmt.Sprintf("/usr/bin/scp -t %s", remoteFile)
+	cmd := fmt.Sprintf("/usr/bin/scp -t -- %s", remoteFile)
+
 	if err := sess.Start(cmd); err != nil {
 		log.Fatal("[", conn.address, "] command failed: ", err)
 	}
@@ -174,12 +177,74 @@ func (conn *Conn) Scp(localFile string, remoteFile string) {
 	mode := fi.Mode().Perm()
 	size := fi.Size()
 	base := path.Base(remoteFile)
-	stdin.Write([]byte(fmt.Sprintf("C0%o %d %s\n", mode, size, base)))
+
+	stdin.Write([]byte(fmt.Sprintf("C%04o %d %s\n", mode, size, base)))
 	response := make([]byte, 1, 1)
 	stdout.Read(response)
 	io.Copy(stdin, f)
 	stdin.Close()
 	err = sess.Wait()
+}
+
+func (conn *Conn) ScpPull(localFile string, remoteFile string) {
+	// overwrite in place, no tempfiles for now
+	f, err := os.Create(localFile)
+	if err != nil {
+		log.Fatal("Could not open local file '", localFile, "' for writing: ", err)
+	}
+
+	sess, err := conn.client.NewSession()
+	if err != nil {
+		log.Fatal("[", conn.Host, "] session creation failed: ", err)
+	}
+	defer sess.Close()
+
+	stdin, _ := sess.StdinPipe()
+	stdout, _ := sess.StdoutPipe()
+
+	cmd := fmt.Sprintf("/usr/bin/scp -f -- %s", remoteFile)
+	if err := sess.Start(cmd); err != nil {
+		log.Fatal("[", conn.address, "] command failed: ", err)
+	}
+
+	stdin.Write([]byte{0}) // ack
+
+	var mode int
+	var size int64
+	var name string
+	bs := bufio.NewReader(stdout)
+	for {
+		line, err := bs.ReadString('\n')
+		stdin.Write([]byte{0}) // ack every message
+		if err != nil {
+			fmt.Printf("BUG: %s\n", err)
+			break
+		}
+		// for now, we only care about the final line with filename/mode/size
+		if strings.HasPrefix(line, "C") {
+			_, err := fmt.Sscanf(line, "C%04o %d %s\n", &mode, &size, &name)
+			if err != nil {
+				fmt.Printf("BUG: %s\n", err)
+				break
+			}
+			break
+		} else {
+			fmt.Printf("ignoring: '%s'\n", line)
+		}
+	}
+
+	written, err := io.CopyN(f, bs, size)
+	if err != nil {
+		fmt.Printf("BUG(%d/%d bytes): %s\n", written, size, err)
+	}
+
+	stdin.Write([]byte{0}) // ack the data
+
+	stdin.Close()
+	err = sess.Wait()
+	if err != nil {
+		fmt.Printf("BUG(%d/%d bytes): %s\n", written, size, err)
+	}
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
