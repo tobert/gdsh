@@ -54,7 +54,7 @@ type runTask struct {
 }
 
 func (task *runTask) Run(conn *gdssh.Conn) error {
-	conn.Scp(task.script.Bytes(), "0555", task.filename)
+	conn.ScpBuf(task.script.Bytes(), "0555", task.filename)
 	cmd := conn.Command(task.filename, task.env)
 	rc, err := cmd.Run()
 

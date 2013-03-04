@@ -9,6 +9,7 @@ package gdssh
 import (
 	"code.google.com/p/go.crypto/ssh"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -123,7 +124,7 @@ func (conn *Conn) Close() {
 }
 
 // scp a buffer to a file on the remote machine
-func (conn *Conn) Scp(buf []byte, mode string, remoteFile string) {
+func (conn *Conn) ScpBuf(buf []byte, mode string, remoteFile string) {
 	sess, err := conn.client.NewSession()
 	if err != nil {
 		log.Fatal("[", conn.Host, "] session creation failed: ", err)
@@ -148,6 +149,37 @@ func (conn *Conn) Scp(buf []byte, mode string, remoteFile string) {
 	err = sess.Wait()
 }
 
-// TODO: add ScpFile
+func (conn *Conn) Scp(localFile string, remoteFile string) {
+	f, err := os.Open(localFile)
+	if err != nil {
+		log.Fatal("Could not read local file '", localFile, "': ", err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+
+	sess, err := conn.client.NewSession()
+	if err != nil {
+		log.Fatal("[", conn.Host, "] session creation failed: ", err)
+	}
+	defer sess.Close()
+
+	stdin, _ := sess.StdinPipe()
+	stdout, _ := sess.StdoutPipe()
+
+	cmd := fmt.Sprintf("/usr/bin/scp -t %s", remoteFile)
+	if err := sess.Start(cmd); err != nil {
+		log.Fatal("[", conn.address, "] command failed: ", err)
+	}
+
+	mode := fi.Mode().Perm()
+	size := fi.Size()
+	base := path.Base(remoteFile)
+	stdin.Write([]byte(fmt.Sprintf("C0%o %d %s\n", mode, size, base)))
+	response := make([]byte, 1, 1)
+	stdout.Read(response)
+	io.Copy(stdin, f)
+	stdin.Close()
+	err = sess.Wait()
+}
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
