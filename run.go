@@ -1,6 +1,7 @@
 package main
 
 import (
+	"./src/gdssh"
 	"bytes"
 	"fmt"
 	"io"
@@ -38,34 +39,53 @@ nohup {{.Command}} 2>&1 >/dev/null &
 {{end}}
 EXIT=$?
 
-rm -f $0
+#rm -f $0
 exit $EXIT
 `
 
-func RunRemote(gdshOpts GdshOptions) int {
+// implements gdssh.Task for use with gdssh.Pool.All()
+type runTask struct {
+	filename string
+	script   *bytes.Buffer
+	env      map[string]string
+}
+
+func (task *runTask) Run(conn *gdssh.Conn) error {
+	conn.Scp(task.script.Bytes(), "0555", task.filename)
+	cmd := conn.Command(task.filename, task.env)
+	rc, err := cmd.Run()
+	log.Printf("Run() of %s on host %s returned %d and error '%s'\n", task.filename, conn.Host, rc, err)
+	return nil
+}
+
+func RunRemote(opt GdshOptions) int {
+	pool := sshPool(opt)
+
 	hostname, _ := os.Hostname()
-	remoteFile := fmt.Sprintf("/tmp/gdsh-script-%s-%d.sh", hostname, time.Now().Unix())
-	conns := NewSshConnMgr(gdshOpts.Key)
-	conns.ConnectList(gdshOpts.sshAddressList(), gdshOpts.User, gdshOpts.Key)
+	run := runTask{
+		filename: fmt.Sprintf("/tmp/gdsh-script-%s-%d.sh", hostname, time.Now().Unix()),
+		script:   new(bytes.Buffer),
+		env:      opt.Env,
+	}
 
-	buf := new(bytes.Buffer)
-
-	if gdshOpts.Command != "" {
+	if opt.Command != "" {
 		t := template.Must(template.New("script").Parse(ScriptTemplate))
-		t.Execute(buf, gdshOpts)
-	} else if gdshOpts.Script != "" {
-		f, err := os.Open(gdshOpts.Script)
+		t.Execute(run.script, opt)
+	} else if opt.Script != "" {
+		f, err := os.Open(opt.Script)
 		if err != nil {
-			log.Fatal("Could not read script file '", gdshOpts.Script, "': ", err)
+			log.Fatal("Could not read script file '", opt.Script, "': ", err)
 		}
-		io.Copy(buf, f)
+		io.Copy(run.script, f)
 		f.Close()
 	}
 
-	conns.ScpAll(buf.Bytes(), "0700", remoteFile)
-	conns.RunCmdAll(fmt.Sprintf("/bin/bash %s", remoteFile), gdshOpts.Env)
+	fmt.Printf("Gonna run commands ...\n")
+	pool.All(&run)
+	fmt.Printf("Ran commands ...\n")
 
-	conns.StopAll()
+	pool.Close()
+	fmt.Printf("Closed ssh ...\n")
 
 	return 1
 }
