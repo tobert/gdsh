@@ -29,9 +29,32 @@ This is a simple ssh command wrapper that parses the arguments just enough to gr
 and set your screen title with escape codes. It's really handy if you use a lot of screens and
 ctrl-a " to list them. Patches to support tmux or xterm titles are welcome.
 
+#### run
+
+Run the given command or script on all the remote servers. Commands (-c) will be run from a shell wrapper
+that is pushed first. Scripts (-s) are run unmodified.
+
+    gdsh run --list default -c "sudo systemctl restart sshd.service"
+
+#### push
+
+Push a file to all servers in the list.
+
+    gdsh push --list default -L /etc/sysctl.conf -R /tmp/sysctl.conf
+    gdsh run --list default -c "sudo cp /tmp/sysctl.conf /etc/sysctl.conf"
+
+#### pull
+
+Gets files from remote servers and stashes them locally, creating a directory per remote server.
+
+    gdsh pull --list default -L /tmp -R /etc/resolv.conf
+    ls -l /tmp/*/resolv.conf
+
 #### in progress
 
-run, sendfile, gatherfile, rsync, ping, local, psgrep, pkill
+serial mode
+
+rsync (or similar), ping, local, psgrep, pkill
 
 More advanced, probably much later:
 
