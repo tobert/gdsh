@@ -15,20 +15,10 @@ import (
 func parseNsshOptions(gdshOpts *GdshOptions) (ssh_args []string) {
 	// we don't actually care about what the ssh options mean, they only
 	// need to be recognized and eliminated so the hostname can be found
-	no_arg_re, err := regexp.Compile("^-[1246AaCfgKkMNnqsTtVvXxY]$")
-	if err != nil {
-		panic("BUG: regular expression compilation failed!")
-	}
-	has_arg_re, err := regexp.Compile("^-[bcDeFiLlmOopRSw]$")
-	if err != nil {
-		panic("BUG: regular expression compilation failed!")
-	}
-
+	no_arg_re := regexp.MustCompile("^-[1246AaCfgKkMNnqsTtVvXxY]$")
+	has_arg_re := regexp.MustCompile("^-[bcDeFiLlmOopRSw]$")
 	// user@hostname is a definite match for hostname, split & replace with -o options
-	user_at_re, err := regexp.Compile("^[-a-z0-9]+@[-.a-zA-Z0-9]+$")
-	if err != nil {
-		panic("BUG: regular expression compilation failed!")
-	}
+	user_at_re := regexp.MustCompile("^[-a-z0-9]+@[-.a-zA-Z0-9]+$")
 
 	skip := false
 	for i, arg := range gdshOpts.Args {
