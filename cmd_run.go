@@ -48,24 +48,49 @@ type runTask struct {
 	filename string
 	script   *bytes.Buffer
 	env      map[string]string
+	format   string
+	rcodes   map[string]int
+	errors   map[string]error
 }
 
 func (task *runTask) Run(conn *gdssh.Conn) error {
 	conn.Scp(task.script.Bytes(), "0555", task.filename)
 	cmd := conn.Command(task.filename, task.env)
 	rc, err := cmd.Run()
-	log.Printf("Run() of %s on host %s returned %d and error '%s'\n", task.filename, conn.Host, rc, err)
+
+	stdout := cmd.DrainStdout()
+	trimmed := bytes.Trim(stdout.Bytes(), "\r\n")
+	for _, str := range bytes.Split(trimmed, []byte{'\r', '\n'}) {
+		fmt.Printf(task.format, conn.Host, str)
+	}
+
+	// not used yet, but silences compiler, need to figure out
+	// a useful way to use these
+	task.rcodes[conn.Host] = rc
+	task.errors[conn.Host] = err
+
 	return nil
 }
 
 func RunRemote(opt GdshOptions) int {
+	padding := 1
 	pool := sshPool(opt)
+
+	// find the longest hostname + 1 for formatting
+	for _, node := range loadListByName(opt.List) {
+		if len(node.Address) >= padding {
+			padding = len(node.Address) + 1
+		}
+	}
 
 	hostname, _ := os.Hostname()
 	run := runTask{
 		filename: fmt.Sprintf("/tmp/gdsh-script-%s-%d.sh", hostname, time.Now().Unix()),
 		script:   new(bytes.Buffer),
 		env:      opt.Env,
+		format:   fmt.Sprintf("%% %ds: %%s\n", padding),
+		rcodes:   make(map[string]int),
+		errors:   make(map[string]error),
 	}
 
 	if opt.Command != "" {
@@ -80,12 +105,8 @@ func RunRemote(opt GdshOptions) int {
 		f.Close()
 	}
 
-	fmt.Printf("Gonna run commands ...\n")
 	pool.All(&run)
-	fmt.Printf("Ran commands ...\n")
-
 	pool.Close()
-	fmt.Printf("Closed ssh ...\n")
 
 	return 1
 }

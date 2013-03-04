@@ -5,6 +5,7 @@
 package gdssh
 
 import (
+	"bytes"
 	"code.google.com/p/go.crypto/ssh"
 	"io"
 	"log"
@@ -20,8 +21,6 @@ type SshCmd struct {
 	stdout  io.Reader
 	stderr  io.Reader
 	running bool
-	done    chan int
-	quit    chan bool
 	conn    *Conn
 	session *ssh.Session
 }
@@ -31,9 +30,10 @@ func (conn *Conn) Command(command string, env map[string]string) *SshCmd {
 		conn:    conn,
 		Command: command,
 		Env:     env,
+		Stdin:   make(chan []byte),
+		Stdout:  make(chan []byte),
+		Stderr:  make(chan []byte),
 		running: false,
-		done:    make(chan int),
-		quit:    make(chan bool),
 	}
 }
 
@@ -106,11 +106,29 @@ func (cmd *SshCmd) Signal(sig ssh.Signal) error {
 	return cmd.session.Signal(sig)
 }
 
+func slurp(ch chan []byte) bytes.Buffer {
+	var buf bytes.Buffer
+	for data := range ch {
+		buf.Write(data)
+	}
+	return buf
+}
+
+// do a blocking read of stdout until the channel closes
+func (cmd *SshCmd) DrainStdout() bytes.Buffer {
+	return slurp(cmd.Stdout)
+}
+
+// do a blocking read of stderr until the channel closes
+func (cmd *SshCmd) DrainStderr() bytes.Buffer {
+	return slurp(cmd.Stderr)
+}
+
 func (cmd *SshCmd) fwdStdin() {
 	for {
 		data, ok := <-cmd.Stdin
 		if !ok {
-			break
+			break // channel closed, all done
 		}
 		wrote, err := cmd.stdin.Write(data)
 		if wrote != len(data) {
@@ -132,9 +150,9 @@ func (cmd *SshCmd) fwdStdxxx(rd io.Reader, ch chan []byte, which string) {
 			log.Printf("[%s] got %s on read\n", which, err)
 			break
 		}
-		log.Printf("[%s] Data: '%s'\n", which, buf)
 		ch <- buf[0:read]
 	}
+	close(ch)
 }
 
 func (cmd *SshCmd) fwdStdout() {
