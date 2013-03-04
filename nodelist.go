@@ -8,10 +8,12 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"strconv"
 )
 
 type Node struct {
 	Address, Comment string
+	Port             int
 	rank             int
 }
 
@@ -77,7 +79,15 @@ func readList(path string) (list []Node) {
 
 		node.rank = line_no
 		parts := strings.SplitN(strings.Trim(line, "\n"), "#", 2)
-		node.Address = strings.Trim(parts[0], " ")
+		dialaddr := strings.Trim(parts[0], " ")
+		if strings.Contains(dialaddr, ":") {
+			np := strings.SplitN(dialaddr, ":", 2)
+			node.Address = np[0]
+			node.Port, _ = strconv.Atoi(np[1])
+		} else {
+			node.Address = strings.Trim(parts[0], " ")
+			node.Port = 22
+		}
 
 		if len(parts) == 2 {
 			node.Comment = strings.Trim(parts[1], " ")
@@ -90,6 +100,16 @@ func readList(path string) (list []Node) {
 	}
 
 	return list
+}
+
+func hostPortMap(name string) map[string]int {
+	list := loadListByName(name)
+	hpm := make(map[string]int)
+
+	for _, node := range list {
+		hpm[node.Address] = node.Port
+	}
+	return hpm
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
