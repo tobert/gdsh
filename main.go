@@ -10,6 +10,7 @@ var supportedCommands = map[string]func(GdshOptions) int{
 	"nssh": NamedScreenSSHWrapper,
 	"run":  RunRemote,
 	"push": cmdPush,
+	"pull": cmdPull,
 }
 
 func main() {
