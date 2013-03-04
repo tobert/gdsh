@@ -7,7 +7,7 @@ import (
 )
 
 type sfTask struct {
-	local string
+	local  string
 	remote string
 }
 
@@ -39,9 +39,9 @@ func parseSfOptions(opt GdshOptions) *sfTask {
 }
 
 func (task *sfTask) Run(conn *gdssh.Conn) error {
-// stat localFile, check for errors
-// copy localfile
-//conn.Scp(task.script.Bytes(), "0555", task.filename)
+	// stat localFile, check for errors
+	// copy localfile
+	//conn.Scp(task.script.Bytes(), "0555", task.filename)
 	fmt.Printf("scp %s %s:%s\n", task.local, conn.Host, task.remote)
 	return nil
 }

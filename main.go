@@ -7,8 +7,8 @@ import (
 )
 
 var supportedCommands = map[string]func(GdshOptions) int{
-	"nssh": NamedScreenSSHWrapper,
-	"run":  RunRemote,
+	"nssh":     NamedScreenSSHWrapper,
+	"run":      RunRemote,
 	"sendfile": cmdSendfile,
 }
 
