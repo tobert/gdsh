@@ -82,17 +82,20 @@ netstat, sysstat
 Add a few aliases to your local host in /etc/hosts then use those names in your gdsh lists.
 
 In /etc/hosts:
+
     # keep a backup, you can mess things up badly if this file breaks
     127.0.0.1 localhost.localdomain	localhost h1 h2 h3
     ::1 localhost.localdomain	localhost h1 h2 h3
 
 In ~/.gdsh/nodes.default:
+
     localhost
     h1
     h2
     h3
 
 Then try it:
+
     go build && ./gdsh run -c uptime
 
 ## LICENSE
