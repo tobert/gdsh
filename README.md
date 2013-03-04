@@ -18,14 +18,16 @@ have a comment after a hash mark. The comment is used in places where it's sensi
 it's ignored. The SSH port may be specified with host:port format, otherwise the default of 22 is used.
 
 Example: ~/.gdsh/nodes.default
+
     node1.mydomain.com
     node2.mydomain.com:22
     node3.mydomain.com:22 # us-east-1a
     node4.mydomain.com
     127.0.0.1 # home sweet home
 
-    # generate a list for a 100 node Hadoop cluster
-    for i in $(seq 1 100)
+You might generate a list for a 1000 node Hadoop cluster:
+
+    for i in $(seq 1 1000)
     do
         echo "hadoop-c1n${i}.mydomain.com" >> ~/.gdsh/nodes.hadoop
     done
