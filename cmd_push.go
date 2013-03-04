@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-type sfTask struct {
+type pushTask struct {
 	local  string
 	remote string
 }
 
-func parseSfOptions(opt GdshOptions) *sfTask {
-	task := sfTask{}
+func parsePushOptions(opt GdshOptions) *pushTask {
+	task := pushTask{}
 
-	// bare argument style, e.g. gdsh sf /etc/hosts /etc/hosts
+	// bare argument style, e.g. gdsh push /etc/hosts /etc/hosts
 	if len(opt.Args) == 2 {
 		if strings.HasPrefix(opt.Args[0], "-") {
 			log.Fatal("Malformed command? Leading dashes are not allowed with bare arguments.")
@@ -62,14 +62,14 @@ func parseSfOptions(opt GdshOptions) *sfTask {
 
 // the file will be opened for each remote host, but that's fine since
 // the reads will end up shared on modern operating systems
-func (task *sfTask) Run(conn *gdssh.Conn) error {
+func (task *pushTask) Run(conn *gdssh.Conn) error {
 	conn.Scp(task.local, task.remote)
 	return nil
 }
 
-func cmdSendfile(opt GdshOptions) int {
+func cmdPush(opt GdshOptions) int {
 	pool := sshPool(opt)
-	task := parseSfOptions(opt)
+	task := parsePushOptions(opt)
 	pool.All(task)
 	pool.Close()
 
