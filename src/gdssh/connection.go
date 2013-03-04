@@ -13,36 +13,48 @@ import (
 	"net"
 	"os"
 	"path"
+	"time"
 )
 
-type SshConn struct {
-	Host    string
-	Port    int
-	User    string
-	Key     string
-	address string
-	auth    []ssh.ClientAuth
-	client  *ssh.ClientConn
+type Conn struct {
+	Host      string
+	Port      int
+	User      string
+	Key       string
+	Retries   int
+	Started   time.Time // last time the connection was made, reset by each retry
+	connected bool      // for tracking whether the connection is alive
+	done      chan bool // for notifying goroutines to stop retrying
+	address   string    // host:port formatted connection address
+	netconn   net.Conn
+	config    *ssh.ClientConfig
+	client    *ssh.ClientConn
 }
 
-func Connect(host string, port int, user string, key string) (conn *SshConn, err error) {
-	conn = &SshConn{
-		Host:    host,
-		Port:    port,
-		User:    user,
-		Key:     key,
-		address: fmt.Sprintf("%s:%d", host, port),
-		auth:    []ssh.ClientAuth{},
+func NewConn(host string, port int, user string, key string) (conn *Conn) {
+	return &Conn{
+		Host:      host,
+		Port:      port,
+		User:      user,
+		Key:       key,
+		Retries:   0,
+		connected: false,
+		done:      make(chan bool),
+		address:   fmt.Sprintf("%s:%d", host, port),
 	}
+}
+
+func (conn *Conn) Connect() error {
+	var auth []ssh.ClientAuth
 
 	// only load a private key if requested ~/.ssh/id_rsa is _not_ loaded automatically
 	// ssh-agent should be the usual path
-	if key != "" {
+	if conn.Key != "" {
 		kr := new(keyring)
-		if err := kr.loadPEM(key); err != nil {
-			log.Fatal("Couldn't load specified private key '", key, "': ", err)
+		if err := kr.loadPEM(conn.Key); err != nil {
+			log.Fatal("Couldn't load specified private key '", conn.Key, "': ", err)
 		}
-		conn.auth = append(conn.auth, ssh.ClientAuthKeyring(kr))
+		auth = append(auth, ssh.ClientAuthKeyring(kr))
 	}
 
 	agentSock := os.Getenv("SSH_AUTH_SOCK")
@@ -56,21 +68,62 @@ func Connect(host string, port int, user string, key string) (conn *SshConn, err
 		}
 
 		agent := ssh.NewAgentClient(sock)
-		conn.auth = append(conn.auth, ssh.ClientAuthAgent(agent))
+		auth = append(auth, ssh.ClientAuthAgent(agent))
 	}
 
-	config := &ssh.ClientConfig{
-		User: user,
-		Auth: conn.auth,
+	conn.config = &ssh.ClientConfig{
+		User: conn.User,
+		Auth: auth,
 	}
 
-	conn.client, err = ssh.Dial("tcp", conn.address, config)
+	return conn.connect()
+}
+
+func (conn *Conn) connect() (err error) {
+	if conn.connected {
+		panic("BUG: connect() called on connected socket/client!")
+	}
+
+	// dial manually so the tcp socket can be closed directly since it's hidden
+	// if you use ssh.Dial, might also be handy for tuning?
+	conn.netconn, err = net.Dial("tcp", conn.address)
+	if err != nil {
+		conn.connected = false
+		return
+	}
+
+	conn.client, err = ssh.Client(conn.netconn, conn.config)
+	if err != nil {
+		conn.connected = false
+		return
+	}
+
+	conn.Started = time.Now()
+	conn.connected = true
 
 	return
 }
 
+func (conn *Conn) Reconnect() error {
+	conn.Close()
+	return conn.connect()
+}
+
+// TODO: some kind of keepalive, possibly open & close ssh channels
+func (conn *Conn) Alive() bool {
+	return conn.connected
+}
+
+func (conn *Conn) Close() {
+	// TODO: watch for memory leaks on long-running programs in case
+	// ssh.Client() doesn't have a Close()
+	conn.netconn.Close() // close the underlying TCP connection, ignore errors
+	conn.connected = false
+	conn.client = nil
+}
+
 // scp a buffer to a file on the remote machine
-func Scp(conn *SshConn, buf []byte, mode string, remoteFile string) {
+func (conn *Conn) Scp(buf []byte, mode string, remoteFile string) {
 	sess, err := conn.client.NewSession()
 	if err != nil {
 		log.Fatal("[", conn.Host, "] session creation failed: ", err)

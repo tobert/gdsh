@@ -5,28 +5,30 @@
 package gdssh
 
 import (
-	"bufio"
 	"code.google.com/p/go.crypto/ssh"
 	"io"
+	"log"
 )
 
 type SshCmd struct {
 	Command string
 	Env     map[string]string
+	Stdin	chan []byte
+	Stdout  chan []byte
+	Stderr  chan []byte
 	stdin   io.Writer
 	stdout  io.Reader
 	stderr  io.Reader
-	bstdout *bufio.Reader
-	bstderr *bufio.Reader
 	running bool
 	done    chan int
 	quit    chan bool
-	conn    *SshConn
+	conn    *Conn
 	session *ssh.Session
 }
 
-func Command(conn *SshConn, command string, env map[string]string) *SshCmd {
+func (conn *Conn) Command(command string, env map[string]string) *SshCmd {
 	return &SshCmd{
+		conn: conn,
 		Command: command,
 		Env:     env,
 		running: false,
@@ -47,26 +49,31 @@ func (cmd *SshCmd) Start() (err error) {
 	}
 
 	if cmd.stdin, err = sess.StdinPipe(); err != nil {
+		log.Println("failed to acquire stdin pipe: %s", err)
 		return
 	}
+	go cmd.fwdStdin()
 
 	if cmd.stdout, err = sess.StdoutPipe(); err != nil {
+		log.Println("failed to acquire stdout pipe: %s", err)
 		return
 	}
+	go cmd.fwdStdout()
 
 	if cmd.stderr, err = sess.StderrPipe(); err != nil {
+		log.Println("failed to acquire stderr pipe: %s", err)
 		return
 	}
-
-	cmd.bstdout = bufio.NewReader(cmd.stdout)
-	cmd.bstderr = bufio.NewReader(cmd.stderr)
+	go cmd.fwdStderr()
 
 	if err = sess.Start(cmd.Command); err != nil {
+		log.Printf("FAILED: '%s': %s\n", cmd.Command, err)
 		return
 	}
 
 	cmd.session = sess
 	cmd.running = true
+
 	return nil
 }
 
@@ -75,8 +82,14 @@ func (cmd *SshCmd) Running() bool {
 }
 
 func (cmd *SshCmd) Wait() (rc int) {
-	cmd.quit <- true
-	return <-cmd.done
+	err := cmd.session.Wait()
+	cmd.running = false
+	if err == nil {
+		return 0
+	}
+	// TODO: figure out how to get at ExitError.Waitmsg
+	log.Printf("\nExit: %s\n", err)
+	return 1
 }
 
 func (cmd *SshCmd) Run() (rc int, err error) {
@@ -84,6 +97,7 @@ func (cmd *SshCmd) Run() (rc int, err error) {
 	if err = cmd.Start(); err != nil {
 		return
 	}
+
 	rc = cmd.Wait()
 	return
 }
@@ -92,24 +106,43 @@ func (cmd *SshCmd) Signal(sig ssh.Signal) error {
 	return cmd.session.Signal(sig)
 }
 
-func (cmd *SshCmd) ReadStdout(p []byte) (int, error) {
-	return cmd.bstdout.Read(p)
+func (cmd *SshCmd) fwdStdin() {
+	for {
+		data, ok := <-cmd.Stdin
+		if !ok {
+			break
+		}
+		wrote, err := cmd.stdin.Write(data)
+		if wrote != len(data) {
+			log.Panic("truncated write to stdin! (%d out of %d written)", wrote, len(data))
+		}
+		if err != nil {
+			log.Panic("Failed write: %s", err)
+		}
+	}
 }
 
-func (cmd *SshCmd) ReadStringStdout(delim byte) (string, error) {
-	return cmd.bstdout.ReadString(delim)
+func (cmd *SshCmd) fwdStdxxx(rd io.Reader, ch chan []byte, which string) {
+	buf := make([]byte, 1024)
+	for {
+		read, err := rd.Read(buf)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Printf("[%s] got %s on read\n", which, err)
+			break
+		}
+		log.Printf("[%s] Data: '%s'\n", which, buf)
+		ch <-buf[0:read]
+	}
 }
 
-func (cmd *SshCmd) ReadStderr(p []byte) (int, error) {
-	return cmd.bstderr.Read(p)
+func (cmd *SshCmd) fwdStdout() {
+	cmd.fwdStdxxx(cmd.stdout, cmd.Stdout, "stdout")
 }
 
-func (cmd *SshCmd) ReadStringStderr(delim byte) (string, error) {
-	return cmd.bstderr.ReadString(delim)
-}
-
-func (cmd *SshCmd) WriteStdin(p []byte) (int, error) {
-	return cmd.stdin.Write(p)
+func (cmd *SshCmd) fwdStderr() {
+	cmd.fwdStdxxx(cmd.stderr, cmd.Stderr, "stderr")
 }
 
 // vim: ts=4 sw=4 noet tw=120 softtabstop=4
