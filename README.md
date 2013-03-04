@@ -15,7 +15,22 @@ the politically correct expansion is "Go Distributed SHell".
 
 Cluster node lists are simple text files with one hostname or IP per line. Each node may optionally
 have a comment after a hash mark. The comment is used in places where it's sensible to show it, otherwise
-it's ignored.
+it's ignored. The SSH port may be specified with host:port format, otherwise the default of 22 is used.
+
+Example: ~/.gdsh/nodes.default
+    node1.mydomain.com
+    node2.mydomain.com:22
+    node3.mydomain.com:22 # us-east-1a
+    node4.mydomain.com
+    127.0.0.1 # home sweet home
+
+    # generate a list for a 100 node Hadoop cluster
+    for i in $(seq 1 100)
+    do
+        echo "hadoop-c1n${i}.mydomain.com" >> ~/.gdsh/nodes.hadoop
+    done
+    # run a command on all of them at once
+    gdsh run --list hadoop -c uptime
 
 ### Tools
 
