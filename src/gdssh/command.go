@@ -13,7 +13,7 @@ import (
 type SshCmd struct {
 	Command string
 	Env     map[string]string
-	Stdin	chan []byte
+	Stdin   chan []byte
 	Stdout  chan []byte
 	Stderr  chan []byte
 	stdin   io.Writer
@@ -28,7 +28,7 @@ type SshCmd struct {
 
 func (conn *Conn) Command(command string, env map[string]string) *SshCmd {
 	return &SshCmd{
-		conn: conn,
+		conn:    conn,
 		Command: command,
 		Env:     env,
 		running: false,
@@ -133,7 +133,7 @@ func (cmd *SshCmd) fwdStdxxx(rd io.Reader, ch chan []byte, which string) {
 			break
 		}
 		log.Printf("[%s] Data: '%s'\n", which, buf)
-		ch <-buf[0:read]
+		ch <- buf[0:read]
 	}
 }
 
